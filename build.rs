@@ -50,6 +50,13 @@ mod build_tesseract {
         println!("cargo:warning=custom_out_dir: {:?}", custom_out_dir);
 
         let cache_dir = custom_out_dir.join("cache");
+        let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_else(|_| "unknown".to_string());
+        let target_arch =
+            env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "unknown".to_string());
+        println!(
+            "cargo:warning=Detected CARGO_CFG_TARGET_OS: {}, CARGO_CFG_TARGET_ARCH: {}",
+            target_os, target_arch
+        );
 
         if env::var("CARGO_CLEAN").is_ok() {
             clean_cache(&cache_dir);
@@ -87,6 +94,7 @@ mod build_tesseract {
             &leptonica_cache_dir,
             &leptonica_install_dir,
             || {
+                println!("cargo:warning=Building leptonica library");
                 let mut leptonica_config = Config::new(&leptonica_dir);
 
                 let leptonica_src_dir = leptonica_dir.join("src");
@@ -94,6 +102,7 @@ mod build_tesseract {
 
                 // Only modify environ.h if it exists
                 if environ_h_path.exists() {
+                    println!("cargo:warning=Modifying environ.h for leptonica");
                     let environ_h = std::fs::read_to_string(&environ_h_path)
                         .expect("Failed to read environ.h")
                         .replace(
@@ -121,14 +130,22 @@ mod build_tesseract {
                         .expect("Failed to write makefile.static");
                 }
 
-                // Configure build tools
-                if cfg!(target_os = "windows") {
-                    // Use NMake on Windows for better compatibility
-                    if let Ok(_vs_install_dir) = env::var("VSINSTALLDIR") {
-                        leptonica_config.generator("NMake Makefiles");
-                    }
+                // Explicitly set target architecture for Windows MSVC generator
+                if target_os == "windows" {
+                    let arch_flag = match target_arch.as_str() {
+                        "x86_64" => "x64",
+                        "aarch64" => "ARM64", // This is the problematic one, but include for completeness
+                        _ => {
+                            println!("cargo:warning=Unsupported Windows target architecture: {}. Attempting to default to x64.", target_arch);
+                            "x64"
+                        }
+                    };
+                    leptonica_config.target(arch_flag); // Use .target() instead of .arg()
+                    println!(
+                        "cargo:warning=Forcing Leptonica CMake to target architecture: {}",
+                        arch_flag
+                    );
                 }
-
                 // Only use sccache if not in CI
                 if env::var("CI").is_err()
                     && env::var("RUSTC_WRAPPER").unwrap_or_default() == "sccache"
@@ -150,17 +167,20 @@ mod build_tesseract {
                     .define("ENABLE_OPENJPEG", "OFF")
                     .define("ENABLE_GIF", "OFF")
                     .define("NO_CONSOLE_IO", "ON")
-                    .define("CMAKE_CXX_FLAGS", &cmake_cxx_flags)
+                    .define("CMAKE_CXX_FLAGS", &cmake_cxx_flags) // Apply common CXX flags
                     .define("MINIMUM_SEVERITY", "L_SEVERITY_NONE")
                     .define("SW_BUILD", "OFF")
                     .define("HAVE_LIBZ", "0")
                     .define("ENABLE_LTO", "OFF")
                     .define("CMAKE_INSTALL_PREFIX", &leptonica_install_dir);
 
-                // Windows-specific defines
-                if cfg!(target_os = "windows") {
+                // Windows-specific defines for consistency and to avoid implicit debug configs
+                if target_os == "windows" {
                     leptonica_config.define("CMAKE_C_FLAGS_RELEASE", "/MD /O2");
-                    // Removed: .define("CMAKE_C_FLAGS_DEBUG", "/MDd /Od");
+                    leptonica_config.define("CMAKE_CXX_FLAGS_RELEASE", "/MD /O2");
+                    leptonica_config.define("CMAKE_C_FLAGS", "-nologo -MD -Brepro");
+                    leptonica_config.define("CMAKE_ASM_FLAGS", "-nologo -MD -Brepro");
+                    leptonica_config.define("CMAKE_ASM_FLAGS_RELEASE", "-nologo -MD -Brepro");
                 }
 
                 for (key, value) in &additional_defines {
@@ -182,6 +202,7 @@ mod build_tesseract {
             &tesseract_cache_dir,
             &tesseract_install_dir,
             || {
+                println!("cargo:warning=Building tesseract library");
                 let cmakelists_path = tesseract_dir.join("CMakeLists.txt");
                 let cmakelists = std::fs::read_to_string(&cmakelists_path)
                     .expect("Failed to read CMakeLists.txt")
@@ -190,12 +211,19 @@ mod build_tesseract {
                     .expect("Failed to write CMakeLists.txt");
 
                 let mut tesseract_config = Config::new(&tesseract_dir);
-                // Configure build tools
-                if cfg!(target_os = "windows") {
-                    // Use NMake on Windows for better compatibility
-                    if let Ok(_vs_install_dir) = env::var("VSINSTALLDIR") {
-                        tesseract_config.generator("NMake Makefiles");
-                    }
+
+                // Explicitly set target architecture for Windows MSVC generator
+                if target_os == "windows" {
+                    let arch_flag = match target_arch.as_str() {
+                        "x86_64" => "x64",
+                        "aarch64" => "ARM64",
+                        _ => "x64", // Fallback
+                    };
+                    tesseract_config.target(arch_flag); // Use .target() instead of .arg()
+                    println!(
+                        "cargo:warning=Forcing Tesseract CMake to target architecture: {}",
+                        arch_flag
+                    );
                 }
 
                 // Only use sccache if not in CI
@@ -477,7 +505,6 @@ mod build_tesseract {
             // Windows-specific MSVC flags
             cmake_cxx_flags.push_str("/EHsc /MP /std:c++17 ");
             additional_defines.push(("CMAKE_CXX_FLAGS_RELEASE".to_string(), "/MD /O2".to_string()));
-            // Removed: additional_defines.push(("CMAKE_CXX_FLAGS_DEBUG".to_string(), "/MDd /Od".to_string()));
             additional_defines.push((
                 "CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS".to_string(),
                 "ON".to_string(),
@@ -517,9 +544,6 @@ mod build_tesseract {
         } else if cfg!(target_os = "windows") {
             // Additional linker flags are generally not required for Windows,
             // as MSVC automatically links the necessary libraries.
-            // However, for some special cases, additions can be made as follows:
-            // println!("cargo:rustc-link-lib=user32");
-            // println!("cargo:rustc-link-lib=gdi32");
         }
 
         println!(
@@ -686,14 +710,14 @@ mod build_tesseract {
         fs::create_dir_all(out_path.parent().unwrap()).expect("Failed to create output directory");
 
         if cached_path.exists() {
-            println!("Using cached {} library", name);
+            println!("cargo:warning=Using cached {} library", name);
             if let Err(e) = fs::copy(&cached_path, &out_path) {
                 println!("cargo:warning=Failed to copy cached library: {}", e);
                 // If cache copy fails, rebuild
                 build_fn();
             }
         } else {
-            println!("Building {} library", name);
+            println!("cargo:warning=Building {} library", name);
             build_fn();
 
             // Look for the library with various possible names
