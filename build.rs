@@ -133,14 +133,14 @@ mod build_tesseract {
                 // Explicitly set target architecture for Windows MSVC generator
                 if target_os == "windows" {
                     let arch_flag = match target_arch.as_str() {
-                        "x86_64" => "x64",
-                        "aarch64" => "ARM64", // This is the problematic one, but include for completeness
+                        "x86_64" => "x86_64",   // Use the Rust target triple for cmake-rs::target()
+                        "aarch64" => "aarch64", // Use the Rust target triple for cmake-rs::target()
                         _ => {
-                            println!("cargo:warning=Unsupported Windows target architecture: {}. Attempting to default to x64.", target_arch);
-                            "x64"
+                            println!("cargo:warning=Unsupported Windows target architecture: {}. Attempting to default to x86_64.", target_arch);
+                            "x86_64"
                         }
                     };
-                    leptonica_config.target(arch_flag); // Use .target() instead of .arg()
+                    leptonica_config.target(arch_flag);
                     println!(
                         "cargo:warning=Forcing Leptonica CMake to target architecture: {}",
                         arch_flag
@@ -215,11 +215,11 @@ mod build_tesseract {
                 // Explicitly set target architecture for Windows MSVC generator
                 if target_os == "windows" {
                     let arch_flag = match target_arch.as_str() {
-                        "x86_64" => "x64",
-                        "aarch64" => "ARM64",
-                        _ => "x64", // Fallback
+                        "x86_64" => "x86_64",   // Use the Rust target triple for cmake-rs::target()
+                        "aarch64" => "aarch64", // Use the Rust target triple for cmake-rs::target()
+                        _ => "x86_64",          // Fallback
                     };
-                    tesseract_config.target(arch_flag); // Use .target() instead of .arg()
+                    tesseract_config.target(arch_flag);
                     println!(
                         "cargo:warning=Forcing Tesseract CMake to target architecture: {}",
                         arch_flag
