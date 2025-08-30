@@ -1,0 +1,12 @@
+; DO NOT EDIT (unless you know what you are doing)
+;
+; This subdirectory is a git "subrepo", and this file is maintained by the
+; git-subrepo command. See https://github.com/ingydotnet/git-subrepo#readme
+;
+[subrepo]
+	remote = https://github.com/cafercangundogdu/tesseract-rs.git
+	branch = master
+	commit = 335fa3c0c088ebf0e9476205089f9ba0a9688e98
+	parent = b15a7ca3cb8dd76c473e37796ff20c3c3cfc131c
+	method = merge
+	cmdver = 0.4.9
